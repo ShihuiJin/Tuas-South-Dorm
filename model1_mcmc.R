@@ -1,0 +1,138 @@
+#a combination of all models
+#model the infections after the start time (set to be after the first infection)
+#fix removal time as 10 days after infection
+#allow seronegatives to get infected and their infection states can be changed
+#for beta parameters in the infection model, use the ratio with b3 for original(v1) b1 and b2, i.e. d1=b1/b3, d2=b2/b3
+#make the unknown S1 as 2
+setwd('~/OneDrive - National University of Singapore/dorm/2_v2')
+ID=t(read.csv("ID.csv"))
+onset_c=t(read.csv('onset_c.csv'))
+cinfected=t(read.csv("cinfected.csv")) #for symptom data
+cinfected_ID=ID[cinfected] #in the order of cinfected
+location=read.csv("location_outcomes.csv")
+data=read.csv('2_data.csv')
+setwd('~/OneDrive - National University of Singapore/dorm/0_v1')
+missing_matrix_c=as.matrix(read.csv('missing_matrix_c.csv'))
+
+#log_posterior functions
+source("model1_functions.R")
+#mh for proposing new b1, b2, b3
+mh=function(current,old, data)
+{
+  reject=FALSE
+  if(current$d1<0|current$d2<0|current$b3<0|current$a2<0|current$a3<0|current$theta<0)reject=TRUE
+  if (mut_c(exp(current$a1-(current$a2)^2), current$a1, current$a2, current$a3)>=1) reject=TRUE
+  if(!reject)
+  {
+    current$m1=tau_c(current)
+    current=logposterior(current, data)
+    logaccprob=current$logposterior[1]-old$logposterior[1]
+    lu=-rexp(1)
+    if(lu>logaccprob)reject=TRUE
+  }
+  if(reject)current=old
+  current
+}
+
+#mh for proposing new infection/removal time
+mh_inf=function(data,old_data, k)
+{
+  reject=FALSE
+  if(data$t_inf[k]<=data$t_inf[first_inf[(data$block[k]-3)/2]]) reject=TRUE
+  if(max(sort(data$t_inf[which(data$block==data$block[k])])[2:sum(data$block==data$block[k]&data$t_inf<=end)]-sort(data$t_inf[which(data$block==data$block[k])])[2:sum(data$block==data$block[k]&data$t_inf<=end)-1])>=10) reject=TRUE
+  if(data$S0[k]==0){
+    if(is.na(data$T1[k])==0&data$S1[k]==1){
+      if(data$t_inf[k]>data$T1[k]-139)reject=TRUE
+    }else if(is.na(data$T1[k])==1&data$S1[k]==1){
+      if(data$t_inf[k]>end)reject=TRUE
+    }
+  }else if(data$S0[k]==1){
+    if(data$t_inf[k]>data$T0[k]-139) reject=TRUE
+  }
+  if(data$t_inf[k]<=start)reject=TRUE
+  if(issym[k]>0){
+    if (data$t_inf[k]+1>onset_c[issym[k]]|data$t_inf[k]+20<=onset_c[issym[k]]) reject=TRUE
+    }
+  if(!reject)
+  {
+    data=logposterior_inf(data, old_data, k)
+    logaccprob=data$delta[1]
+    if(is.finite(logaccprob)==0){
+      reject=TRUE
+      }else{
+        lu=-rexp(1)
+        if(lu>logaccprob)reject=TRUE
+      }
+  }
+  if(reject)data=old_data
+  data
+}
+
+
+library(MASS)
+first_inf=rep(0,5) #fix the logposterior of these as 0
+for (i in 1:5)
+{
+  first_inf[i]=which(data$t_inf==min(data$t_inf[which(data$block==i*2+3)]))
+}
+issym=rep(0, nrow(data)) #symtomatic infections with value >0, place in onset_c
+onset_sym=rep(0,nrow(data))
+for(i in 1:nrow(data))
+{
+  if (length(which(cinfected_ID==data$ID[i]))>0){
+    issym[i]=which(cinfected_ID==data$ID[i])
+    onset_sym[i]=onset_c[issym[i]]
+  }
+}
+start=-28; end=60
+current=list(a1=2.29, a2=0.76, a3=1.87, theta=0.105, m1=1, d1=rnorm(1,0.07, 1e-2), d2=rnorm(1,0.13, 1e-2), b3=rnorm(1,0.012, 2e-3))
+current$m1=tau_c(current)
+current$inf_order=c(start, sort(unique(c(data$t_inf[which(data$t_inf>start&data$t_inf<=end)],data$t_rem[which(data$t_rem>start&data$t_rem<=end)]))))
+var=diag(c(0.01,0.004,0.01,0.001,5e-4,1e-3,4e-3),7,7)/10
+#var=cov(store[,c(1,2,3,4,6,7,8)])/100
+MCMCiterations=10000
+acceptance_rate=0
+s_inf=matrix(0,nrow=MCMCiterations, ncol=nrow(data))
+logpos=matrix(0,nrow=MCMCiterations,ncol=15)
+store=data.frame(a1=rep(0,MCMCiterations), a2=rep(0,MCMCiterations), a3=rep(0,MCMCiterations), theta=rep(0,MCMCiterations), m1=rep(0,MCMCiterations), d1=rep(0,MCMCiterations), d2=rep(0,MCMCiterations), b3=rep(0,MCMCiterations))
+mean_incub=rep(0,MCMCiterations)
+for(iteration in 1:MCMCiterations)
+{
+  if(iteration%%1e3==0)print(paste0('iteration: ',iteration, ';  time: ', Sys.time()))
+  old=logposterior(current, data)
+  logpos[iteration,]=old$logposterior
+  current[c(1,2,3,4,6,7,8)]=mvrnorm(1,as.numeric(current[c(1,2,3,4,6,7,8)]),var)
+  current=mh(current,old, data)
+  if(current$a1!=old$a1|current$a2!=old$a2|current$a3!=old$a3|current$theta!=old$theta|current$d1!=old$d1|current$d2!=old$d2|current$b3!=old$b3) acceptance_rate=acceptance_rate+1
+  #variables for calculating the log-posterior of augmented t_inf&t_rem
+  inf_order=current$inf_order[-1]
+  lambda_i=current$lambda_i
+  data$lambda_inf=rep(1, nrow(data)) #if infected before -10, lambda_inf=1
+  for (i in which(data$t_inf>start&data$t_inf<=end)) #one-time use, for calculating lambda_inf
+  {
+    data$lambda_inf[i]=lambda_i[i, which(inf_order==data$t_inf[i])]
+  }
+  for(k in sample(seq(1,nrow(data)),500)) #change infection/removal time of the infection group only
+  {
+    if(k%in%first_inf)next
+    old_data=data
+    data$t_inf[k]=rnorm(1,data$t_inf[k],0.5)
+    data$t_rem[k]=data$t_inf[k]+10
+    data=mh_inf(data, old_data, k)
+  }
+  store[iteration,1]=current$a1
+  store[iteration,2]=current$a2
+  store[iteration,3]=current$a3
+  store[iteration,4]=current$theta
+  store[iteration,5]=current$m1
+  store[iteration,6]=current$d1
+  store[iteration,7]=current$d2
+  store[iteration,8]=current$b3
+  mean_incub[iteration]=mean(data$t_inf[which(issym>0)]-onset_sym[which(issym>0)])
+  s_inf[iteration, ]=data$t_inf
+}
+
+r=sample(seq(1,1e4),1)
+write.csv(s_inf, paste0(r,"_inf_result.csv"), row.names = FALSE)
+write.csv(logpos, paste0(r,"_logpos_result.csv"), row.names = FALSE)
+write.csv(store, paste0(r,"_store_result.csv"), row.names = FALSE)
