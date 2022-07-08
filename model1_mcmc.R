@@ -92,7 +92,7 @@ var=diag(c(0.01,0.004,0.01,0.001,5e-4,1e-3,4e-3),7,7)/10
 #var=cov(store[,c(1,2,3,4,6,7,8)])/100
 MCMCiterations=10000
 acceptance_rate=0
-s_inf=matrix(0,nrow=MCMCiterations, ncol=nrow(data))
+s_inf=lapply(1:5, function(k) matrix(0,nrow=MCMCiterations, ncol=end-start+1) )
 logpos=matrix(0,nrow=MCMCiterations,ncol=15)
 store=data.frame(a1=rep(0,MCMCiterations), a2=rep(0,MCMCiterations), a3=rep(0,MCMCiterations), theta=rep(0,MCMCiterations), m1=rep(0,MCMCiterations), d1=rep(0,MCMCiterations), d2=rep(0,MCMCiterations), b3=rep(0,MCMCiterations))
 mean_incub=rep(0,MCMCiterations)
@@ -129,10 +129,13 @@ for(iteration in 1:MCMCiterations)
   store[iteration,7]=current$d2
   store[iteration,8]=current$b3
   mean_incub[iteration]=mean(data$t_inf[which(issym>0)]-onset_sym[which(issym>0)])
-  s_inf[iteration, ]=data$t_inf
+  for(k in 1:5)
+  {
+    s_inf[[k]][iteration,]=as.vector(do.call("cbind", lapply(start:end, function(t) sum(data$t_inf[data$block==k*2+3]<=t)-sum(data$t_inf[data$block==k*2+3]<=t-1) ))) #new infections in the time interval (t-1,t]
+  }
 }
 
 r=sample(seq(1,1e4),1)
-write.csv(s_inf, paste0(r,"_inf_result.csv"), row.names = FALSE)
+lapply(1:5, function(k) write.csv(s_inf[[k]], paste0(r,"_inf_result_",k,".csv"), row.names = FALSE) )
 write.csv(logpos, paste0(r,"_logpos_result.csv"), row.names = FALSE)
 write.csv(store, paste0(r,"_store_result.csv"), row.names = FALSE)

@@ -118,9 +118,9 @@ current$t=rep(1,5)
 current$inf_order=c(start, sort(unique(c(data$t_inf[which(data$t_inf>start&data$t_inf<=end)],data$t_rem[which(data$t_rem>start&data$t_rem<=end)]))))
 var=diag(c(0.01,0.004,0.01,0.001,5e-6,1e-5,2e-4,rep(0.01,length(current$t)-1)),6+length(current$t),6+length(current$t))/100
 var[1:7,1:7]=cov(store[1:MCMCiterations,c(1,2,3,4,6,7,8)])/100
-MCMCiterations=5000
+MCMCiterations=10000
 acceptance_rate=0
-s_inf=matrix(0,nrow=MCMCiterations, ncol=nrow(data))
+s_inf=lapply(1:5, function(k) matrix(0,nrow=MCMCiterations, ncol=end-start+1) )
 logpos=matrix(0,nrow=MCMCiterations,ncol=15)
 store=data.frame(a1=rep(0,MCMCiterations), a2=rep(0,MCMCiterations), a3=rep(0,MCMCiterations), theta=rep(0,MCMCiterations), m1=rep(0,MCMCiterations), b1=rep(0,MCMCiterations), b2=rep(0,MCMCiterations), b3=rep(0,MCMCiterations),t2=rep(0,MCMCiterations),t3=rep(0,MCMCiterations),t4=rep(0,MCMCiterations),t5=rep(0,MCMCiterations))
 mean_incub=rep(0,MCMCiterations)
@@ -160,10 +160,13 @@ for(iteration in 1:MCMCiterations)
   store[iteration,8]=current$b3
   store[iteration,9:(7+length(current$t))]=current$t[-1]
   mean_incub[iteration]=mean(data$t_inf[which(issym>0)]-onset_sym[which(issym>0)])
-  s_inf[iteration, ]=data$t_inf
+  for(k in 1:5)
+  {
+    s_inf[[k]][iteration,]=as.vector(do.call("cbind", lapply(start:end, function(t) sum(data$t_inf[data$block==k*2+3]<=t)-sum(data$t_inf[data$block==k*2+3]<=t-1) ))) #new infections in the time interval (t-1,t]
+  }
 }
 
 r=sample(seq(1,1e4),1)
-write.csv(s_inf, paste0(r,"_inf_result.csv"), row.names = FALSE)
+lapply(1:5, function(k) write.csv(s_inf[[k]], paste0(r,"_inf_result_",k,".csv"), row.names = FALSE) )
 write.csv(logpos, paste0(r,"_logpos_result.csv"), row.names = FALSE)
 write.csv(store, paste0(r,"_store_result.csv"), row.names = FALSE)
